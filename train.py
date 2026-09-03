@@ -129,9 +129,12 @@ def build_model(device):
             model = PeftModel.from_pretrained(base_model, resume_dir, is_trainable=True)
         else:
             from peft import LoraConfig, get_peft_model
+            # No task_type: the Higgs model has no HF generate interface
+            # (prepare_inputs_for_generation); a generic PeftModel just injects LoRA,
+            # and we run our own forward + generate_speech.
             model = get_peft_model(base_model, LoraConfig(
                 r=C.LORA_R, lora_alpha=C.LORA_ALPHA, lora_dropout=C.LORA_DROPOUT,
-                target_modules=C.LORA_TARGET_MODULES, bias="none", task_type="CAUSAL_LM"))
+                target_modules=C.LORA_TARGET_MODULES, bias="none"))
         base = model.get_base_model()
         if C.TRAIN_AUDIO_EMBEDDING:
             base.audio_embedding.weight.requires_grad_(True)     # PEFT can't wrap it → train directly
