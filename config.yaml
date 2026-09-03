@@ -1,0 +1,50 @@
+# ── Edit this file, then run.  (Any value can still be overridden by an env var
+#    of the same name, e.g.  TRAIN_MODE=lora python train.py) ──
+
+# ---- paths ----
+HIGGS_MODEL_DIR: multimodalart/higgs-audio-v3-tts-4b-transformers   # HF id or local dir
+DATASET_DIR: /workspace/female_voice_telugu     # unzipped dataset (has transcripts/ + audio/)
+DATA_DIR:    /workspace/data                     # SHARED prepared data (both runs read this)
+WORK_DIR:    /workspace/runs/run_partial         # per-run: checkpoints + samples go here
+
+# ---- text frontend ----
+ROMANIZE_SCHEME: iso            # iso (run #1) | ascii | native
+
+# ---- data ----
+MAX_AUDIO_SEC: 20.0             # raise to 30 on an 80GB GPU to keep long clips
+MIN_AUDIO_SEC: 0.4
+N_EVAL: 100                     # held-out utterances (never trained on)
+NUM_EVAL_RENDER: 8              # how many held-out lines to render each checkpoint
+
+# ---- training ----
+TRAIN_MODE: partial             # partial (effectiveness) | lora (efficiency)
+UNFREEZE_LAYER_INDICES: null    # e.g. [35, 34, 33, 30, 12] from layer_probe.py; null = last-N
+UNFREEZE_LAST_N_LAYERS: 12      # used when UNFREEZE_LAYER_INDICES is null
+TRAIN_AUDIO_EMBEDDING: true     # the fused audio embed/head (CB0 = prosody) — keep true
+TRAIN_FINAL_NORM: true
+LORA_R: 32
+LORA_ALPHA: 64
+LORA_DROPOUT: 0.05
+
+DTYPE: bfloat16                 # native precision, NO quantization
+EPOCHS: 2                       # partial 2-3; lora 3-4
+LEARNING_RATE: 5.0e-5           # partial 5e-5; lora 2e-4
+GRAD_ACCUM_STEPS: 16
+WARMUP_RATIO: 0.03
+WEIGHT_DECAY: 0.01
+MAX_GRAD_NORM: 1.0
+GRADIENT_CHECKPOINTING: true
+SEED: 1234
+CODEBOOK_WEIGHTS: null          # null = equal 8 codebooks; e.g. [1.5,1,1,1,1,1,1,1] to favor CB0
+
+# ---- checkpoint / listening ----
+SAVE_EVERY_STEPS: 500
+SAMPLE_EVERY_STEPS: 250         # render listening samples this often (250 = early feedback)
+KEEP_LAST_CKPTS: 3              # prune older full checkpoints (partial saves ~8GB each)
+ENGLISH_CHECK_SENTENCES:        # rendered each ckpt to catch base forgetting (listen by ear)
+  - "The quick brown fox jumps over the lazy dog."
+  - "Thanks for listening, and I will see you in the next episode."
+
+# ---- hugging face upload ----
+HF_REPO_ID: your-username/higgs-telugu-female-iso
+HF_PRIVATE: true

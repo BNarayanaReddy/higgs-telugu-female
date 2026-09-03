@@ -39,13 +39,14 @@ and made to be copied to a training server and run there.
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. point config.py at your data (or export env vars):
-# HIGGS_MODEL_DIR can be a local repo dir OR a HF repo id to auto-download the ~8GB model:
-export HIGGS_MODEL_DIR=multimodalart/higgs-audio-v3-tts-4b-transformers
-export DATASET_DIR=/workspace/female_voice_telugu     # set by download_data.py (unzip target)
-export WORK_DIR=/abs/path/to/runs/run1_iso
-export HF_REPO_ID=BNarayanaReddy/higgs-telugu-pavani-iso
+# 2. edit config.yaml  (paths, HF repo, epochs, lr, train mode …)
+nano config.yaml
 ```
+
+**All settings live in `config.yaml`** — edit it once. Every value can still be overridden
+per-run by an env var of the same name (env > yaml > default), which is how the two runs
+below differ without touching the file. `HIGGS_MODEL_DIR` may be a local dir OR a HF repo id
+(`multimodalart/higgs-audio-v3-tts-4b-transformers`) to auto-download the ~8 GB model.
 
 Sanity-check the frontend before anything else: `python frontend.py`.
 
