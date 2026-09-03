@@ -163,6 +163,11 @@ def build_model(device):
             for p in model.model.norm.parameters():
                 p.requires_grad_(True)
 
+    # transformers >=5.5 expects _tied_weights_keys as a dict {tied: source}; the ported
+    # model declares a list, which crashes save_pretrained at tied.keys(). Normalize it.
+    if isinstance(getattr(type(base), "_tied_weights_keys", None), list):
+        type(base)._tied_weights_keys = {"audio_head.weight": "audio_embedding.weight"}
+
     n = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[{C.TRAIN_MODE}] trainable params: {n/1e6:.1f}M"
           + (f"  (RESUMED from {resume_dir})" if resume_dir else ""), flush=True)
