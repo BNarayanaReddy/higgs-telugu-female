@@ -97,6 +97,7 @@ MAX_GRAD_NORM = _f("MAX_GRAD_NORM", 1.0)
 GRADIENT_CHECKPOINTING = _b("GRADIENT_CHECKPOINTING", True)
 SEED = _i("SEED", 1234)
 CODEBOOK_WEIGHTS = _list_float("CODEBOOK_WEIGHTS")
+RESUME = _s("RESUME", "")       # ""=fresh | "auto"=latest checkpoint | "/path/to/step_XXXXXX"
 
 # ─────────────────────── checkpoint / listening ───────────────────────
 SAVE_EVERY_STEPS = _i("SAVE_EVERY_STEPS", 500)

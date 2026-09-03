@@ -36,6 +36,7 @@ MAX_GRAD_NORM: 1.0
 GRADIENT_CHECKPOINTING: true
 SEED: 1234
 CODEBOOK_WEIGHTS: null          # null = equal 8 codebooks; e.g. [1.5,1,1,1,1,1,1,1] to favor CB0
+RESUME: ""                      # "" = fresh | "auto" = latest checkpoint | "/path/to/step_000500"
 
 # ---- checkpoint / listening ----
 SAVE_EVERY_STEPS: 500

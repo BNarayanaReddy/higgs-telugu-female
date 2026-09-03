@@ -33,6 +33,9 @@ def load(repo):
         model = AutoModelForCausalLM.from_pretrained(
             base_id, trust_remote_code=True, dtype=torch.bfloat16)
         model = PeftModel.from_pretrained(model, repo).get_base_model()
+        ae = os.path.join(repo, "audio_embedding.pt")            # trained audio embed (lora ckpt)
+        if os.path.exists(ae):
+            model.audio_embedding.weight.data.copy_(torch.load(ae, map_location="cpu"))
     else:
         model = AutoModelForCausalLM.from_pretrained(
             repo, trust_remote_code=True, dtype=torch.bfloat16)
