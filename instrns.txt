@@ -1,0 +1,5 @@
+All scripts compile; nothing run here. New run order:
+python prepare_data.py      # 100 held out
+python layer_probe.py       # → paste UNFREEZE_LAYER_INDICES   (partial run only)
+TRAIN_MODE=partial WORK_DIR=runs/run_partial python train.py
+TRAIN_MODE=lora    WORK_DIR=runs/run_lora    python train.py

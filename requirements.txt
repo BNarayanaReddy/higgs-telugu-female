@@ -1,0 +1,7 @@
+torch>=2.1.0
+torchaudio>=2.1.0
+transformers>=5.5.0
+accelerate
+indic_transliteration
+huggingface_hub
+peft>=0.11.0        # only needed if TRAIN_MODE="lora"
