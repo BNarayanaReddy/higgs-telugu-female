@@ -135,9 +135,14 @@ def render_samples(base, tok, step, eval_texts):
 
 def save_ckpt(model, tok, path):
     os.makedirs(path, exist_ok=True)
-    model.save_pretrained(path)     # partial: full model; lora: adapter only
+    model.save_pretrained(path)     # partial: full model (~8GB); lora: adapter only
     tok.save_pretrained(path)
     print(f"  saved -> {path}", flush=True)
+    # prune old step checkpoints to save disk (final_model is separate)
+    import glob, shutil
+    ckpts = sorted(glob.glob(os.path.join(C.CKPT_DIR, "step_*")))
+    for old in ckpts[:-C.KEEP_LAST_CKPTS]:
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def main():

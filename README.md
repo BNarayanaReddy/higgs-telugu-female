@@ -40,9 +40,9 @@ python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 # 2. point config.py at your data (or export env vars):
-export HIGGS_MODEL_DIR=/abs/path/to/higgs-audio-v3-tts-4b-transformers
-export CSV_DIR=/abs/path/to/codemix_full          # per-folder CSVs
-export AUDIO_ROOT=/abs/path/to/pavani_audio        # AUDIO_ROOT/<csv_stem>/<file>.wav
+# HIGGS_MODEL_DIR can be a local repo dir OR a HF repo id to auto-download the ~8GB model:
+export HIGGS_MODEL_DIR=multimodalart/higgs-audio-v3-tts-4b-transformers
+export DATASET_DIR=/workspace/female_voice_telugu     # set by download_data.py (unzip target)
 export WORK_DIR=/abs/path/to/runs/run1_iso
 export HF_REPO_ID=BNarayanaReddy/higgs-telugu-pavani-iso
 ```
@@ -52,6 +52,8 @@ Sanity-check the frontend before anything else: `python frontend.py`.
 ## Run order
 
 ```bash
+python download_data.py          # pull + unzip dataset from R2 public URL → prints DATASET_DIR
+export DATASET_DIR=/workspace/female_voice_telugu     # (as printed)
 python prepare_data.py           # → data/manifest_{train,eval}.jsonl + codes/*.pt  (100 held out for eval)
 python layer_probe.py            # (optional, partial-FT) rank layers by importance → paste UNFREEZE_LAYER_INDICES
 python train.py                  # → checkpoints/, samples/step_*/  ← LISTEN to these

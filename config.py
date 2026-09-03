@@ -12,15 +12,19 @@ HIGGS_MODEL_DIR = os.environ.get(
     "HIGGS_MODEL_DIR",
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..")),
 )
-# Corpus: per-folder CSVs (cols: filename,start,end,old_transcript,saaras_codemix)
-# and audio at  AUDIO_ROOT/<csv_stem>/<filename>.
-CSV_DIR = os.environ.get("CSV_DIR", "/path/on/server/codemix_full")
-AUDIO_ROOT = os.environ.get("AUDIO_ROOT", "/path/on/server/pavani_audio")
-TRANSCRIPT_COLUMN = "saaras_codemix"
+# Corpus layout (the `female_voice_telugu` dataset):
+#   DATASET_DIR/transcripts/<name>.csv   cols: filename,start,end,old_transcript,saaras_codemix
+#   DATASET_DIR/audio/<name>/<filename>.wav
+# On the server: unzip the dataset, then set DATASET_DIR (transcripts/audio derive from it).
+DATASET_DIR = os.environ.get("DATASET_DIR", "/workspace/female_voice_telugu")
+CSV_DIR = os.environ.get("CSV_DIR", os.path.join(DATASET_DIR, "transcripts"))
+AUDIO_ROOT = os.environ.get("AUDIO_ROOT", os.path.join(DATASET_DIR, "audio"))
+TRANSCRIPT_COLUMN = "saaras_codemix"       # code-switch transcript (Telugu script + English)
 
 # Where prepared data + checkpoints + final model go.
 WORK_DIR = os.environ.get("WORK_DIR", os.path.join(os.path.dirname(__file__), "runs", "run1_iso"))
-DATA_DIR = os.path.join(WORK_DIR, "data")          # cached codes + manifest
+# DATA_DIR is separate so BOTH runs share one prepared dataset (encode 15.5h once).
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(WORK_DIR, "data"))   # cached codes + manifest
 CKPT_DIR = os.path.join(WORK_DIR, "checkpoints")
 FINAL_DIR = os.path.join(WORK_DIR, "final_model")
 SAMPLES_DIR = os.path.join(WORK_DIR, "samples")    # per-checkpoint listening samples
@@ -51,8 +55,9 @@ TRAIN_MODE = os.environ.get("TRAIN_MODE", "partial")
 #     (ref_influence_decay: with-ref vs no-ref L2 explodes ~L29-35).
 # For a DATA-DRIVEN list, run layer_probe.py and paste its ranked indices into
 # UNFREEZE_LAYER_INDICES (overrides UNFREEZE_LAST_N_LAYERS). None => use last-N.
-UNFREEZE_LAYER_INDICES = None      # e.g. [35,34,33,32,31,30,29,28,12,11] from the probe
-UNFREEZE_LAST_N_LAYERS = 12        # fallback when UNFREEZE_LAYER_INDICES is None
+_idx = os.environ.get("UNFREEZE_LAYER_INDICES", "").strip()
+UNFREEZE_LAYER_INDICES = [int(x) for x in _idx.replace(" ", "").split(",") if x] or None  # from probe
+UNFREEZE_LAST_N_LAYERS = int(os.environ.get("UNFREEZE_LAST_N_LAYERS", 12))  # fallback
 TRAIN_AUDIO_EMBEDDING = True        # the [8208,2560] fused embed/head — where expression lives
 TRAIN_FINAL_NORM = True
 
@@ -63,11 +68,11 @@ LORA_DROPOUT = 0.05
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 DTYPE = "bfloat16"             # model's native precision; NO quantization (per decision)
-EPOCHS = 3
-LEARNING_RATE = 1e-4          # partial-FT; use ~2e-4 for lora
+EPOCHS = int(os.environ.get("EPOCHS", 3))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 5e-5))   # partial-FT; use 2e-4 for lora
 WARMUP_RATIO = 0.03
 WEIGHT_DECAY = 0.01
-GRAD_ACCUM_STEPS = 16          # effective batch (per-example micro-batch = 1)
+GRAD_ACCUM_STEPS = int(os.environ.get("GRAD_ACCUM_STEPS", 16))  # eff batch (micro-batch = 1)
 MAX_GRAD_NORM = 1.0
 GRADIENT_CHECKPOINTING = True
 SEED = 1234
@@ -79,6 +84,9 @@ CODEBOOK_WEIGHTS = None        # None = equal. e.g. [1.5,1,1,1,1,1,1,1] to favor
 # ─────────────────────── CHECKPOINT / LISTENING ───────────────────────
 SAVE_EVERY_STEPS = 500
 SAMPLE_EVERY_STEPS = 500       # render zero-reference samples for listening
+# partial-FT checkpoints are FULL models (~8 GB each) — keep only the last few on
+# disk (final_model is always saved separately). Raise if you have disk to spare.
+KEEP_LAST_CKPTS = int(os.environ.get("KEEP_LAST_CKPTS", 3))
 # Sentences rendered each checkpoint (put your held-out, UNSEEN lines here:
 # questions, exclamations, long-form, heavy code-switch). Native script OK —
 # they are romanized through the same frontend at generation time.
