@@ -18,6 +18,33 @@ import glob
 import json
 import os
 import random
+import re
+import unicodedata
+
+# Precise ASR-failure / non-speech signatures. High precision: only reject machine
+# junk, never legit short words, numbers, or sentences that merely mention a URL.
+_ERRMARK = re.compile(r'\[ERR\b', re.I)                       # the pipeline's error prefix
+_TAG = re.compile(r'<\s*/?\s*[a-zA-Z!][^>]*>')               # real HTML/XML tag
+_ENTITY = re.compile(r'&[a-z#0-9]{2,7};', re.I)             # HTML entity
+_JSONISH = re.compile(r'\{[^{}]*[:,][^{}]*\}')              # {"...": ...} machine payload
+_ESCAPE = re.compile(r'\\[nrt]')                             # literal \n \t escapes
+_NONSPEECH = {"music", "noise", "silence", "applause",
+              "[empty]", "[music]", "[noise]", "(music)", "none", "null"}
+
+
+def valid_transcript(t):
+    """Reject only genuine ASR-failure payloads / non-speech tags — NOT legit short
+    utterances ('Okay', 'Hello', '7000', a name) or sentences that mention a URL."""
+    t = (t or "").strip()
+    if not t:
+        return False
+    if _ERRMARK.search(t):
+        return False
+    if _TAG.search(t) or _ENTITY.search(t) or _JSONISH.search(t) or _ESCAPE.search(t):
+        return False
+    if t.lower() in _NONSPEECH:
+        return False
+    return True
 
 import torch
 import torchaudio
@@ -62,7 +89,7 @@ def main():
                 fn = row["filename"]
                 text = (row.get(C.TRANSCRIPT_COLUMN) or "").strip()
                 audio_path = os.path.join(C.AUDIO_ROOT, stem, fn)
-                if not text or not os.path.exists(audio_path):
+                if not valid_transcript(text) or not os.path.exists(audio_path):
                     n_skip += 1
                     continue
                 try:

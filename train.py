@@ -33,6 +33,18 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import config as C
 
 
+def fix_tied_weights_keys(module):
+    """transformers >=5.5 wants _tied_weights_keys as a dict {tied: source}; the ported
+    Higgs model declares a list, which crashes save_pretrained at `tied.keys()`. Normalize
+    every submodule that still has a list. Value must be the real source (audio_embedding)
+    so safetensors drops the tied copy instead of erroring on a shared tensor."""
+    for m in module.modules():
+        twk = getattr(m, "_tied_weights_keys", None)
+        if isinstance(twk, list):
+            m._tied_weights_keys = {
+                k: ("audio_embedding.weight" if k == "audio_head.weight" else k) for k in twk}
+
+
 def load_manifest(path):
     with open(path, encoding="utf-8") as f:
         return [json.loads(l) for l in f if l.strip()]
@@ -163,10 +175,7 @@ def build_model(device):
             for p in model.model.norm.parameters():
                 p.requires_grad_(True)
 
-    # transformers >=5.5 expects _tied_weights_keys as a dict {tied: source}; the ported
-    # model declares a list, which crashes save_pretrained at tied.keys(). Normalize it.
-    if isinstance(getattr(type(base), "_tied_weights_keys", None), list):
-        type(base)._tied_weights_keys = {"audio_head.weight": "audio_embedding.weight"}
+    fix_tied_weights_keys(model)     # list -> dict _tied_weights_keys (save_pretrained bug)
 
     n = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[{C.TRAIN_MODE}] trainable params: {n/1e6:.1f}M"
@@ -174,9 +183,23 @@ def build_model(device):
     return model, base, resume_dir
 
 
+def _save_without_codec(m, path):
+    """save_pretrained, but don't serialize the frozen codec that attaches lazily during
+    sampling — it bloats checkpoints and reloads UNEXPECTED (it's re-fetched fresh anyway)."""
+    codec = getattr(m, "_audio_codec", None)
+    if codec is not None:
+        m._audio_codec = None
+    try:
+        m.save_pretrained(path)
+    finally:
+        if codec is not None:
+            m._audio_codec = codec
+
+
 def save_ckpt(model, base, tok, path, state=None):
     os.makedirs(path, exist_ok=True)
-    model.save_pretrained(path)                               # partial: full model; lora: adapter
+    fix_tied_weights_keys(model)                              # guard right at the save site
+    _save_without_codec(model, path)                          # partial: full model; lora: adapter
     tok.save_pretrained(path)
     torch.save(base.audio_embedding.weight.data.detach().cpu(),
                os.path.join(path, "audio_embedding.pt"))       # trained separately in lora mode
@@ -191,9 +214,11 @@ def save_final(model, base, tok):
     os.makedirs(C.FINAL_DIR, exist_ok=True)
     if C.TRAIN_MODE == "lora":
         merged = model.merge_and_unload()                     # bake LoRA into a self-contained model
-        merged.save_pretrained(C.FINAL_DIR)                    # includes the trained audio_embedding
+        fix_tied_weights_keys(merged)
+        _save_without_codec(merged, C.FINAL_DIR)              # includes the trained audio_embedding
     else:
-        model.save_pretrained(C.FINAL_DIR)
+        fix_tied_weights_keys(model)
+        _save_without_codec(model, C.FINAL_DIR)
     tok.save_pretrained(C.FINAL_DIR)
     print(f"  final model -> {C.FINAL_DIR}", flush=True)
 
@@ -237,18 +262,29 @@ def main():
     # ---- resume optimizer/scheduler/step/RNG ----
     start_epoch = start_it = gstep = 0
     resume_order = None
-    if resume_dir and os.path.exists(os.path.join(resume_dir, "training_state.pt")):
-        st = torch.load(os.path.join(resume_dir, "training_state.pt"), map_location="cpu")
-        opt.load_state_dict(st["opt"]); sched.load_state_dict(st["sched"])
-        gstep = st["gstep"]; start_epoch = st["epoch"]; start_it = st["it"] + 1
-        resume_order = st["order"]
-        random.setstate(st["py_rng"]); torch.set_rng_state(st["torch_rng"])
-        if st.get("cuda_rng") is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(st["cuda_rng"])
-        print(f"resumed at epoch {start_epoch}, it {start_it}, gstep {gstep}", flush=True)
+    ts_path = os.path.join(resume_dir, "training_state.pt") if resume_dir else None
+    if ts_path and os.path.exists(ts_path):
+        try:
+            st = torch.load(ts_path, map_location="cpu")
+            opt.load_state_dict(st["opt"]); sched.load_state_dict(st["sched"])
+            gstep = st["gstep"]; start_epoch = st["epoch"]; start_it = st["it"] + 1
+            resume_order = st["order"]
+            random.setstate(st["py_rng"]); torch.set_rng_state(st["torch_rng"])
+            if st.get("cuda_rng") is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all(st["cuda_rng"])
+            print(f"resumed at epoch {start_epoch}, it {start_it}, gstep {gstep}", flush=True)
+        except Exception as e:
+            # weights are already loaded from resume_dir in build_model; only the optimizer
+            # state is unreadable (e.g. truncated by a disk-full crash). Keep the weights,
+            # start a fresh optimizer/schedule.
+            print(f"WARNING: training_state.pt unreadable ({type(e).__name__}); "
+                  f"WEIGHTS-ONLY resume — fresh optimizer/schedule.", flush=True)
 
     for epoch in range(start_epoch, C.EPOCHS):
-        if epoch == start_epoch and resume_order is not None:
+        # reuse the saved shuffle order only if the dataset is unchanged; if the manifest
+        # was cleaned/shrunk since the checkpoint, the old indices would go out of range,
+        # so fall back to a fresh shuffle for this epoch.
+        if epoch == start_epoch and resume_order is not None and len(resume_order) == len(ds):
             order, begin = resume_order, start_it
         else:
             order = list(range(len(ds))); random.shuffle(order); begin = 0
