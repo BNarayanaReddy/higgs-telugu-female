@@ -1,2 +1,8 @@
 __pycache__
 *.pyc
+*.zip
+*.wav
+*.csv
+*.pt
+data/
+runs/
