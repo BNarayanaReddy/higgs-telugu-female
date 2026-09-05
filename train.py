@@ -6,9 +6,9 @@ text with embed_tokens and audio codes with the fused audio_embedding, run the
 Qwen3 backbone, apply the fused audio_head, and cross-entropy the 8 codebooks
 against the delay-patterned target rows (BOC ramp-in masked, EOC kept).
 
-Full precision (bf16 native, NO quantization). TRAIN_MODE="partial" unfreezes
-selected layers + the fused audio embedding/head + final norm; "lora" adds LoRA
-across the backbone and trains the audio embedding directly.
+Full precision (bf16 native, NO quantization). LoRA adapters are injected across
+the backbone; the fused audio embedding (CB0 = prosody, tied to the head) is
+unfrozen and trained directly (PEFT can't wrap it).
 
 Features: held-out eval loss + listening samples every SAMPLE_EVERY_STEPS;
 checkpoints (with optimizer/scheduler/step/RNG) every SAVE_EVERY_STEPS, prunable;
@@ -129,56 +129,36 @@ def resolve_resume():
 
 
 def build_model(device):
-    """Load model (mode + resume aware), set requires_grad. Returns model, base, resume_dir."""
+    """Load base model, inject LoRA (or resume an adapter), unfreeze the fused audio
+    embedding. Returns model (PeftModel), base, resume_dir."""
     dtype = getattr(torch, C.DTYPE)
     resume_dir = resolve_resume()
 
-    if C.TRAIN_MODE == "lora":
-        base_model = AutoModelForCausalLM.from_pretrained(
-            C.HIGGS_MODEL_DIR, trust_remote_code=True, dtype=dtype).to(device)
-        if resume_dir:
-            from peft import PeftModel
-            model = PeftModel.from_pretrained(base_model, resume_dir, is_trainable=True)
-        else:
-            from peft import LoraConfig, get_peft_model
-            # No task_type: the Higgs model has no HF generate interface
-            # (prepare_inputs_for_generation); a generic PeftModel just injects LoRA,
-            # and we run our own forward + generate_speech.
-            model = get_peft_model(base_model, LoraConfig(
-                r=C.LORA_R, lora_alpha=C.LORA_ALPHA, lora_dropout=C.LORA_DROPOUT,
-                target_modules=C.LORA_TARGET_MODULES, bias="none"))
-        base = model.get_base_model()
-        if C.TRAIN_AUDIO_EMBEDDING:
-            base.audio_embedding.weight.requires_grad_(True)     # PEFT can't wrap it → train directly
-        if resume_dir:
-            ae = os.path.join(resume_dir, "audio_embedding.pt")
-            if os.path.exists(ae):
-                base.audio_embedding.weight.data.copy_(torch.load(ae, map_location=device))
-    else:  # partial
-        model = AutoModelForCausalLM.from_pretrained(
-            resume_dir or C.HIGGS_MODEL_DIR, trust_remote_code=True, dtype=dtype).to(device)
-        base = model
-        for p in model.parameters():
-            p.requires_grad_(False)
-        layers = model.model.layers
-        if C.UNFREEZE_LAYER_INDICES:
-            idxs = sorted(i for i in C.UNFREEZE_LAYER_INDICES if 0 <= i < len(layers))
-        else:
-            idxs = list(range(len(layers) - C.UNFREEZE_LAST_N_LAYERS, len(layers)))
-        for i in idxs:
-            for p in layers[i].parameters():
-                p.requires_grad_(True)
-        print(f"  unfrozen backbone layers: {idxs}", flush=True)
-        if C.TRAIN_AUDIO_EMBEDDING:
-            base.audio_embedding.weight.requires_grad_(True)     # audio_head is tied to this
-        if C.TRAIN_FINAL_NORM:
-            for p in model.model.norm.parameters():
-                p.requires_grad_(True)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        C.HIGGS_MODEL_DIR, trust_remote_code=True, dtype=dtype).to(device)
+    if resume_dir:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(base_model, resume_dir, is_trainable=True)
+    else:
+        from peft import LoraConfig, get_peft_model
+        # No task_type: the Higgs model has no HF generate interface
+        # (prepare_inputs_for_generation); a generic PeftModel just injects LoRA,
+        # and we run our own forward + generate_speech.
+        model = get_peft_model(base_model, LoraConfig(
+            r=C.LORA_R, lora_alpha=C.LORA_ALPHA, lora_dropout=C.LORA_DROPOUT,
+            target_modules=C.LORA_TARGET_MODULES, bias="none"))
+    base = model.get_base_model()
+    if C.TRAIN_AUDIO_EMBEDDING:
+        base.audio_embedding.weight.requires_grad_(True)     # PEFT can't wrap it → train directly
+    if resume_dir:
+        ae = os.path.join(resume_dir, "audio_embedding.pt")
+        if os.path.exists(ae):
+            base.audio_embedding.weight.data.copy_(torch.load(ae, map_location=device))
 
     fix_tied_weights_keys(model)     # list -> dict _tied_weights_keys (save_pretrained bug)
 
     n = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[{C.TRAIN_MODE}] trainable params: {n/1e6:.1f}M"
+    print(f"[lora] trainable params: {n/1e6:.1f}M"
           + (f"  (RESUMED from {resume_dir})" if resume_dir else ""), flush=True)
     return model, base, resume_dir
 
@@ -199,7 +179,7 @@ def _save_without_codec(m, path):
 def save_ckpt(model, base, tok, path, state=None):
     os.makedirs(path, exist_ok=True)
     fix_tied_weights_keys(model)                              # guard right at the save site
-    _save_without_codec(model, path)                          # partial: full model; lora: adapter
+    _save_without_codec(model, path)                          # LoRA adapter
     tok.save_pretrained(path)
     torch.save(base.audio_embedding.weight.data.detach().cpu(),
                os.path.join(path, "audio_embedding.pt"))       # trained separately in lora mode
@@ -212,13 +192,9 @@ def save_ckpt(model, base, tok, path, state=None):
 
 def save_final(model, base, tok):
     os.makedirs(C.FINAL_DIR, exist_ok=True)
-    if C.TRAIN_MODE == "lora":
-        merged = model.merge_and_unload()                     # bake LoRA into a self-contained model
-        fix_tied_weights_keys(merged)
-        _save_without_codec(merged, C.FINAL_DIR)              # includes the trained audio_embedding
-    else:
-        fix_tied_weights_keys(model)
-        _save_without_codec(model, C.FINAL_DIR)
+    merged = model.merge_and_unload()                     # bake LoRA into a self-contained model
+    fix_tied_weights_keys(merged)
+    _save_without_codec(merged, C.FINAL_DIR)              # includes the trained audio_embedding
     tok.save_pretrained(C.FINAL_DIR)
     print(f"  final model -> {C.FINAL_DIR}", flush=True)
 

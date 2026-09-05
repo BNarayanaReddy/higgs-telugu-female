@@ -1,14 +1,24 @@
-# ── Edit this file, then run.  (Any value can still be overridden by an env var
-#    of the same name, e.g.  TRAIN_MODE=lora python train.py) ──
+# ─────────────────────────────────────────────────────────────────────────────
+# Single source of truth for the Telugu ISO LoRA fine-tune.
+# Edit THIS file — nothing else. config.py only loads it (no values live there).
+# Any value may still be overridden per-run by an env var of the same name
+# (env > yaml), e.g.:  WORK_DIR=runs/exp2 LEARNING_RATE=1e-4 python train.py
+# Point at a different file with:  CONFIG_YAML=/path/to/other.yaml python train.py
+# ─────────────────────────────────────────────────────────────────────────────
 
 # ---- paths ----
 HIGGS_MODEL_DIR: multimodalart/higgs-audio-v3-tts-4b-transformers   # HF id or local dir
-DATASET_DIR: /workspace/female_voice_telugu     # unzipped dataset (has transcripts/ + audio/)
-DATA_DIR:    /workspace/data                     # SHARED prepared data (both runs read this)
-WORK_DIR:    /workspace/runs/run_partial         # per-run: checkpoints + samples go here
+DATASET_DIR: /workspace/female_voice_telugu     # unzipped dataset (transcripts/ + audio/)
+DATA_DIR:    /workspace/data                     # prepared codes + manifests
+WORK_DIR:    /workspace/runs/run_lora            # checkpoints + samples + final_model go here
+TRANSCRIPT_COLUMN: saaras_codemix               # CSV column holding the transcript
+# CSV_DIR / AUDIO_ROOT default to DATASET_DIR/transcripts and DATASET_DIR/audio;
+# uncomment to override a non-standard layout.
+# CSV_DIR:    /workspace/female_voice_telugu/transcripts
+# AUDIO_ROOT: /workspace/female_voice_telugu/audio
 
 # ---- text frontend ----
-ROMANIZE_SCHEME: iso            # iso (run #1) | ascii | native
+ROMANIZE_SCHEME: iso            # iso (chosen) | ascii | native
 
 # ---- data ----
 MAX_AUDIO_SEC: 20.0             # raise to 30 on an 80GB GPU to keep long clips
@@ -16,19 +26,17 @@ MIN_AUDIO_SEC: 0.4
 N_EVAL: 100                     # held-out utterances (never trained on)
 NUM_EVAL_RENDER: 8              # how many held-out lines to render each checkpoint
 
-# ---- training ----
-TRAIN_MODE: partial             # partial (effectiveness) | lora (efficiency)
-UNFREEZE_LAYER_INDICES: null    # e.g. [35, 34, 33, 30, 12] from layer_probe.py; null = last-N
-UNFREEZE_LAST_N_LAYERS: 12      # used when UNFREEZE_LAYER_INDICES is null
-TRAIN_AUDIO_EMBEDDING: true     # the fused audio embed/head (CB0 = prosody) — keep true
-TRAIN_FINAL_NORM: true
+# ---- LoRA ----
 LORA_R: 32
 LORA_ALPHA: 64
 LORA_DROPOUT: 0.05
+LORA_TARGET_MODULES: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+TRAIN_AUDIO_EMBEDDING: true     # the fused audio embed/head (CB0 = prosody) — trained full-rank
 
+# ---- training ----
 DTYPE: bfloat16                 # native precision, NO quantization
-EPOCHS: 2                       # partial 2-3; lora 3-4
-LEARNING_RATE: 5.0e-5           # partial 5e-5; lora 2e-4
+EPOCHS: 4                       # lora 3-4
+LEARNING_RATE: 2.0e-4
 GRAD_ACCUM_STEPS: 16
 WARMUP_RATIO: 0.03
 WEIGHT_DECAY: 0.01
@@ -41,7 +49,7 @@ RESUME: ""                      # "" = fresh | "auto" = latest checkpoint | "/pa
 # ---- checkpoint / listening ----
 SAVE_EVERY_STEPS: 500
 SAMPLE_EVERY_STEPS: 250         # render listening samples this often (250 = early feedback)
-KEEP_LAST_CKPTS: 3              # prune older full checkpoints (partial saves ~8GB each)
+KEEP_LAST_CKPTS: 3              # prune older checkpoints
 ENGLISH_CHECK_SENTENCES:        # rendered each ckpt to catch base forgetting (listen by ear)
   - "The quick brown fox jumps over the lazy dog."
   - "Thanks for listening, and I will see you in the next episode."

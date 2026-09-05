@@ -5,10 +5,10 @@ custom modeling code + the frozen frontend into the repo and writes a model card
 with a runnable snippet.
 
   huggingface-cli login          # once
-  python upload_hf.py            # uses HF_REPO_ID from config.py (or env)
+  python upload_hf.py            # uses HF_REPO_ID from config.yaml (or env)
 
-For TRAIN_MODE="partial" this uploads the full model (self-contained).
-For "lora" it uploads the adapter; set the base_model in the card to a public repo.
+Uploads WORK_DIR/final_model — the merged, self-contained model (LoRA already
+baked in via merge_and_unload), so it loads anywhere with no adapter needed.
 """
 import os
 import shutil

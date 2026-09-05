@@ -5,4 +5,4 @@ pyyaml
 accelerate
 indic_transliteration
 huggingface_hub
-peft>=0.11.0        # only needed if TRAIN_MODE="lora"
+peft>=0.11.0        # LoRA adapters

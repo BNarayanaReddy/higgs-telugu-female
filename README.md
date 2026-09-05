@@ -13,10 +13,11 @@ and made to be copied to a training server and run there.
   so it rides English's token paths, then fine-tune on the corpus. Phase-1 A/B chose
   **ISO** (keeps every phoneme, least accent; ASCII bakes in an English accent, native
   stays byte-soup). Zero-training romanization is unstable — training is what fixes it.
-- **Method:** targeted **partial fine-tuning** (last N layers + the fused audio
-  embedding/head + final norm), **full precision (bf16 native, NO quantization)**.
-  Single-speaker data ⇒ the voice is learned unconditionally, so **no reference and no
-  speaker token at serve.**
+- **Method:** **LoRA** across the backbone + the fused audio embedding/head trained
+  directly, **full precision (bf16 native, NO quantization)**. The low-rank update
+  regularizes, so the base's ISO-reading/prosody survives (blanket partial-FT forgot
+  it). Single-speaker data ⇒ the voice is learned unconditionally, so **no reference
+  and no speaker token at serve.**
 - **Eval = your ears.** No automated metric harness; each checkpoint renders Telugu +
   English samples for you to listen to.
 
@@ -24,10 +25,11 @@ and made to be copied to a training server and run there.
 
 | file | what it does |
 |---|---|
-| `config.py` | all paths + hyperparameters — **edit this first** |
+| `config.yaml` | all paths + hyperparameters — **the one file you edit** |
+| `config.py` | loads `config.yaml` and exposes the values (no settings live here) |
 | `frontend.py` | the frozen ISO romanizer (train = serve; never diverge) |
 | `prepare_data.py` | romanize transcripts + encode audio → cached codes + manifest |
-| `train.py` | partial-FT (or LoRA) with the multi-codebook delay-pattern loss |
+| `train.py` | LoRA fine-tune with the multi-codebook delay-pattern loss |
 | `infer.py` | one-call zero-reference inference (local dir or HF repo) |
 | `upload_hf.py` | push self-contained model + frontend + model card to HF Hub |
 
@@ -39,13 +41,14 @@ and made to be copied to a training server and run there.
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 2. edit config.yaml  (paths, HF repo, epochs, lr, train mode …)
+# 2. edit config.yaml  (paths, HF repo, epochs, lr …)
 nano config.yaml
 ```
 
-**All settings live in `config.yaml`** — edit it once. Every value can still be overridden
-per-run by an env var of the same name (env > yaml > default), which is how the two runs
-below differ without touching the file. `HIGGS_MODEL_DIR` may be a local dir OR a HF repo id
+**All settings live in `config.yaml`** — it is the single file to edit; `config.py`
+just loads it. Every value can still be overridden per-run by an env var of the same
+name (env > yaml), e.g. `WORK_DIR=runs/exp2 LEARNING_RATE=1e-4 python train.py`.
+`HIGGS_MODEL_DIR` may be a local dir OR a HF repo id
 (`multimodalart/higgs-audio-v3-tts-4b-transformers`) to auto-download the ~8 GB model.
 
 Sanity-check the frontend before anything else: `python frontend.py`.
@@ -56,29 +59,22 @@ Sanity-check the frontend before anything else: `python frontend.py`.
 python download_data.py          # pull + unzip dataset from R2 public URL → prints DATASET_DIR
 export DATASET_DIR=/workspace/female_voice_telugu     # (as printed)
 python prepare_data.py           # → data/manifest_{train,eval}.jsonl + codes/*.pt  (100 held out for eval)
-python layer_probe.py            # (optional, partial-FT) rank layers by importance → paste UNFREEZE_LAYER_INDICES
 python train.py                  # → checkpoints/, samples/step_*/  ← LISTEN to these
 python upload_hf.py               # → pushes WORK_DIR/final_model to the Hub
 python infer.py --repo $HF_REPO_ID --text "హలో, ఎలా ఉన్నారు?" --out out.wav
 ```
 
-## The two runs (both planned)
+## What gets trained
 
-| run | `TRAIN_MODE` | question it answers | design |
-|---|---|---|---|
-| **efficiency** | `lora` | how *cheaply* can the base adapt to one speaker? | LoRA **spread thin across all 36 layers** (r=32) + the audio embedding — broad & light **by intent** |
-| **effectiveness** | `partial` | best quality we can reach | full-precision FT of the **most important layers** (from `layer_probe.py`) + audio embedding |
-
-```bash
-TRAIN_MODE=lora    WORK_DIR=runs/run_lora    python train.py
-TRAIN_MODE=partial WORK_DIR=runs/run_partial python train.py
-```
-
-## Layer selection — analysis-driven, not arbitrary
-
-- **Audio embedding/head (both runs):** carries CB0 = pitch/prosody (codebook-roles analysis); the head is tied to it. Always trained.
-- **Partial-FT layers:** the reference/expression effect concentrates in **late layers** (`ref_influence_decay`: with-ref vs no-ref L2 explodes ~L29–35), so the default is a late block. **To make it fully data-driven, run `layer_probe.py`** — it backprops the loss on the 100 held-out utterances and ranks layers by gradient magnitude, then prints an `UNFREEZE_LAYER_INDICES` list to paste into `config.py`. That converts "last 12" from a heuristic into a measurement.
-- **LoRA layers:** all layers, all 7 proj modules — the right design for the *efficiency* question (adjust the whole stack with minimal params).
+- **LoRA:** all 36 layers, all 7 proj modules (`q/k/v/o/gate/up/down`), `r=32`. The
+  low-rank update adapts the whole stack with few params, which regularizes against the
+  catastrophic forgetting a blanket full-parameter fine-tune showed (US accent + flat).
+- **Fused audio embedding/head:** carries CB0 = pitch/prosody (codebook-roles analysis)
+  and the head is tied to it, so PEFT can't wrap it — it is unfrozen and trained directly.
+- Launch a run (override any value per-run via env):
+  ```bash
+  WORK_DIR=runs/run_lora python train.py
+  ```
 
 ## Evaluation = your ears, on held-out data
 
@@ -88,8 +84,8 @@ TRAIN_MODE=partial WORK_DIR=runs/run_partial python train.py
 
 - Training: a single **≥24 GB** GPU (40–80 GB comfortable). Full precision, no
   quantization. This is **not** the 6 GB laptop — that stays for listening/inference.
-- Rough knobs if you OOM: lower `UNFREEZE_LAST_N_LAYERS`, keep
-  `GRADIENT_CHECKPOINTING=True`, or switch `TRAIN_MODE="lora"`.
+- Rough knobs if you OOM: keep `GRADIENT_CHECKPOINTING: true`, lower `LORA_R`, or
+  lower `MAX_AUDIO_SEC`.
 
 ## Gotchas
 
@@ -99,6 +95,6 @@ TRAIN_MODE=partial WORK_DIR=runs/run_partial python train.py
   handles fp32. On tiny GPUs decode can OOM — a non-issue on the training server.
 - `audio_head.weight` is **tied** to `audio_embedding.weight`; training the embedding
   trains the head. (The load report prints it as "MISSING" — that's the tie, expected.)
-- Run #1 is deliberately the smallest thing that could work. Next runs: CB0-weighted
-  loss, partial-FT vs LoRA A/B, an optional `native` control, longer context.
+- Run #1 is deliberately the smallest thing that could work. Next levers: CB0-weighted
+  loss (`CODEBOOK_WEIGHTS`), a separate LR for the audio embedding, batching, longer context.
 ```

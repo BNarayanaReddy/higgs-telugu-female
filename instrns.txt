@@ -1,5 +1,4 @@
-All scripts compile; nothing run here. New run order:
+All scripts compile; nothing run here. Run order (edit config.yaml first):
 python prepare_data.py      # 100 held out
-python layer_probe.py       # → paste UNFREEZE_LAYER_INDICES   (partial run only)
-TRAIN_MODE=partial WORK_DIR=runs/run_partial python train.py
-TRAIN_MODE=lora    WORK_DIR=runs/run_lora    python train.py
+python train.py             # LoRA fine-tune → checkpoints/, samples/step_* (LISTEN)
+python upload_hf.py         # push WORK_DIR/final_model to the Hub
