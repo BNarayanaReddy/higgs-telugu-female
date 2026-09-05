@@ -47,5 +47,5 @@ ENGLISH_CHECK_SENTENCES:        # rendered each ckpt to catch base forgetting (l
   - "Thanks for listening, and I will see you in the next episode."
 
 # ---- hugging face upload ----
-HF_REPO_ID: your-username/higgs-telugu-female-iso
+HF_REPO_ID: BNarayanaReddy/higgs-telugu-female-lora-iso
 HF_PRIVATE: true

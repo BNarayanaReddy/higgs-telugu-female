@@ -74,7 +74,7 @@ def main():
 
     HfApi().create_repo(C.HF_REPO_ID, private=C.HF_PRIVATE, exist_ok=True)
     upload_folder(repo_id=C.HF_REPO_ID, folder_path=src,
-                  commit_message="Telugu ISO single-speaker fine-tune (run #1)")
+                  commit_message="Telugu ISO single-speaker fine-tune (run LoRA)")
     print(f"pushed -> https://huggingface.co/{C.HF_REPO_ID}")
 
 

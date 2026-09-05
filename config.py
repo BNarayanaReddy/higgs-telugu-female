@@ -109,5 +109,5 @@ ENGLISH_CHECK_SENTENCES = _list_str("ENGLISH_CHECK_SENTENCES", [
 ])
 
 # ─────────────────────── hugging face ───────────────────────
-HF_REPO_ID = _s("HF_REPO_ID", "your-username/higgs-telugu-female-iso")
+HF_REPO_ID = _s("HF_REPO_ID", "BNarayanaReddy/higgs-telugu-female-lora-iso")
 HF_PRIVATE = _b("HF_PRIVATE", True)

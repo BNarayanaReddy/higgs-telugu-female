@@ -27,7 +27,7 @@ LORA_ALPHA: 64
 LORA_DROPOUT: 0.05
 
 DTYPE: bfloat16                 # native precision, NO quantization
-EPOCHS: 5                       # partial 2-3; lora 3-4
+EPOCHS: 10                       # partial 2-3; lora 3-4
 LEARNING_RATE: 2.0e-4           # partial 5e-5; lora 2e-4
 GRAD_ACCUM_STEPS: 16
 WARMUP_RATIO: 0.05
